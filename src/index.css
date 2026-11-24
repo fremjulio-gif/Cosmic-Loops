@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+:root {
+  --bg-void: #050609;
+  --text-primary: #f2f5fa;
+  --text-secondary: #a2acc0;
+  --text-muted: #667085;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  width: 100%;
+  background-color: var(--bg-void);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif;
+  overflow-x: clip;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.font-mono-tabular {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.safe-sampler-frame {
+  height: 100dvh;
+  width: 100vw;
+  max-width: 100vw;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-gallery-frame {
+  min-height: 100dvh;
+  width: 100%;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+
+/* Clean Apple Liquid Glass Materials */
+.liquid-glass {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.088) 0%,
+    rgba(16, 20, 30, 0.56) 100%
+  );
+  -webkit-backdrop-filter: blur(28px) saturate(165%);
+  backdrop-filter: blur(28px) saturate(165%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+    0 22px 52px rgba(0, 0, 0, 0.5);
+  isolation: isolate;
+  transform: translateZ(0);
+}
+
+.liquid-card {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(12, 15, 23, 0.62) 100%
+  );
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 14px 34px rgba(0, 0, 0, 0.42);
+  isolation: isolate;
+  transform: translateZ(0);
+}
+
+.liquid-pill {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.105) 0%,
+    rgba(255, 255, 255, 0.035) 100%
+  );
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 8px 24px rgba(0, 0, 0, 0.34);
+  isolation: isolate;
+  transform: translateZ(0);
+}
+
+.liquid-pill-active {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(226, 232, 242, 0.88) 100%
+  );
+  color: #06080d;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+.liquid-well {
+  background: rgba(5, 7, 12, 0.54);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.touch-surface {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.touch-btn {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.scroll-contain {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.scroll-contain::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.scroll-contain::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-contain::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .space-card:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.085) 0%,
+      rgba(16, 20, 30, 0.72) 100%
+    );
+  }
+
+  .space-card:hover .space-card-img {
+    transform: scale(1.035);
+  }
+
+  .liquid-hover:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.15) 0%,
+      rgba(255, 255, 255, 0.06) 100%
+    );
+    border-color: rgba(255, 255, 255, 0.24);
+  }
+}

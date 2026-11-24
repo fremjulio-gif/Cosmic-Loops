@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.DS_Store
+Chandra_Universe_of_Sound/
+*.log
+.env*
