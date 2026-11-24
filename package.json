@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "transcode": "node scripts/transcode-audio.mjs",
+    "optimize-images": "node scripts/optimize-images.mjs",
     "catalog": "node scripts/build-catalog.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

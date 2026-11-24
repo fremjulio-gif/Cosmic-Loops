@@ -379,12 +379,18 @@ async function fetchText(url) {
 }
 
 async function downloadImageLocal(remoteUrl, localBaseName) {
+  const webpFile = `${localBaseName}.webp`;
+  const webpPath = path.join(IMAGES_DIR, webpFile);
+  if (fs.existsSync(webpPath) && fs.statSync(webpPath).size > 100) {
+    return `nasa-images/${webpFile}`;
+  }
+
   const extMatch = remoteUrl.match(/\.(jpg|jpeg|png|webp)(?:$|\?)/i);
   const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : '.jpg';
   const fileName = `${localBaseName}${ext}`;
   const outPath = path.join(IMAGES_DIR, fileName);
 
-  if (fs.existsSync(outPath) && fs.statSync(outPath).size > 1000) {
+  if (fs.existsSync(outPath) && fs.statSync(outPath).size > 100) {
     return `nasa-images/${fileName}`;
   }
 

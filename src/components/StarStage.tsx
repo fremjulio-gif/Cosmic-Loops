@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LoopSamplerEngine } from '../audio/LoopSamplerEngine';
 import type { ScanMode, StarObject } from '../types/catalog';
 import {
@@ -55,6 +55,7 @@ interface ZoomableStarFrameProps {
   isPlaying: boolean;
   className: string;
   isExpanded: boolean;
+  keyboardActive: boolean;
   onToggleExpand: () => void;
 }
 
@@ -66,6 +67,7 @@ function ZoomableStarFrame({
   isPlaying,
   className,
   isExpanded,
+  keyboardActive,
   onToggleExpand,
 }: ZoomableStarFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
@@ -87,54 +89,220 @@ function ZoomableStarFrame({
   const stateRef = useRef({ star, loopRange, isPlaying });
   stateRef.current = { star, loopRange, isPlaying };
 
-  const applyTransform = (nextZoom: number, nextPan: { x: number; y: number }) => {
-    const z = Number(clamp(nextZoom, MIN_ZOOM, MAX_ZOOM).toFixed(3));
-    const el = frameRef.current;
-    const rect = el?.getBoundingClientRect();
-    const clampedPan = rect
-      ? clampPan(nextPan, z, rect.width, rect.height)
-      : { x: 0, y: 0 };
-    zoomRef.current = z;
-    panRef.current = clampedPan;
-    setZoom(z);
-    setPan(clampedPan);
-  };
+  const drawScanOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-  const zoomAtPoint = (targetZoom: number, clientX: number, clientY: number) => {
-    const el = frameRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const prevZ = zoomRef.current;
-    const prevP = panRef.current;
-    const nextZ = clamp(targetZoom, MIN_ZOOM, MAX_ZOOM);
+    const engine = LoopSamplerEngine.getInstance();
+    const { star: curStar, loopRange: range, isPlaying: playing } = stateRef.current;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    const invZ = 1 / Math.max(1, zoomRef.current);
 
-    if (nextZ <= 1.005) {
-      applyTransform(1, { x: 0, y: 0 });
-      return;
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    const [a, b] = range;
+    const playNorm = engine.getPlayheadNormalized();
+    const rms = playing ? engine.getMasterRMS() : 0;
+
+    if (curStar.scanMode === 'left-to-right') {
+      ctx.fillStyle = 'rgba(5, 6, 9, 0.54)';
+      if (a > 0.002) ctx.fillRect(0, 0, a * w, h);
+      if (b < 0.998) ctx.fillRect(b * w, 0, (1 - b) * w, h);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+      ctx.lineWidth = 1 * invZ;
+      if (a > 0.002) {
+        ctx.beginPath();
+        ctx.moveTo(a * w, 0);
+        ctx.lineTo(a * w, h);
+        ctx.stroke();
+      }
+      if (b < 0.998) {
+        ctx.beginPath();
+        ctx.moveTo(b * w, 0);
+        ctx.lineTo(b * w, h);
+        ctx.stroke();
+      }
+
+      if (playing) {
+        const x = playNorm * w;
+        const trailW = 28 * invZ;
+        const grad = ctx.createLinearGradient(x - trailW, 0, x + 4 * invZ, 0);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        grad.addColorStop(0.85, `rgba(255, 255, 255, ${0.18 + rms * 0.2})`);
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x - trailW, 0, trailW + 4 * invZ, h);
+
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.78 + rms * 0.22})`;
+        ctx.lineWidth = 1.6 * invZ;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+    } else if (curStar.scanMode === 'vertical') {
+      ctx.fillStyle = 'rgba(5, 6, 9, 0.54)';
+      if (a > 0.002) ctx.fillRect(0, 0, w, a * h);
+      if (b < 0.998) ctx.fillRect(0, b * h, w, (1 - b) * h);
+
+      if (playing) {
+        const y = playNorm * h;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.78 + rms * 0.22})`;
+        ctx.lineWidth = 1.6 * invZ;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+    } else if (curStar.scanMode === 'clockwise') {
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      const r = Math.hypot(cx, cy);
+      const startAng = -Math.PI * 0.5 + a * Math.PI * 2;
+      const endAng = -Math.PI * 0.5 + b * Math.PI * 2;
+
+      if (b - a < 0.99) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.lineWidth = 1 * invZ;
+        for (const ang of [startAng, endAng]) {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r);
+          ctx.stroke();
+        }
+      }
+
+      if (playing) {
+        const curAng = -Math.PI * 0.5 + playNorm * Math.PI * 2;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.82 + rms * 0.18})`;
+        ctx.lineWidth = 1.6 * invZ;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(curAng) * r, cy + Math.sin(curAng) * r);
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, (3 + rms * 3) * invZ, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (curStar.scanMode === 'radial') {
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      const maxR = Math.min(w, h) * 0.52;
+
+      if (b - a < 0.99) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.26)';
+        ctx.lineWidth = 1 * invZ;
+        for (const radNorm of [a, b]) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, radNorm * maxR, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+
+      if (playing) {
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 + rms * 0.2})`;
+        ctx.lineWidth = 1.6 * invZ;
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(2, playNorm * maxR), 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
-    const fx = clientX - (rect.left + rect.width / 2);
-    const fy = clientY - (rect.top + rect.height / 2);
-    const nextX = fx - ((fx - prevP.x) / prevZ) * nextZ;
-    const nextY = fy - ((fy - prevP.y) / prevZ) * nextZ;
-    applyTransform(nextZ, { x: nextX, y: nextY });
-  };
+    ctx.restore();
+  }, []);
 
-  const zoomByStep = (factor: number) => {
-    const el = frameRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    zoomAtPoint(
-      zoomRef.current * factor,
-      rect.left + rect.width / 2,
-      rect.top + rect.height / 2
-    );
-  };
+  const applyTransform = useCallback(
+    (nextZoom: number, nextPan: { x: number; y: number }) => {
+      const z = Number(clamp(nextZoom, MIN_ZOOM, MAX_ZOOM).toFixed(3));
+      const el = frameRef.current;
+      const rect = el?.getBoundingClientRect();
+      const clampedPan = rect
+        ? clampPan(nextPan, z, rect.width, rect.height)
+        : { x: 0, y: 0 };
+      zoomRef.current = z;
+      panRef.current = clampedPan;
+      setZoom(z);
+      setPan(clampedPan);
+      drawScanOverlay();
+    },
+    [drawScanOverlay]
+  );
+
+  const zoomAtPoint = useCallback(
+    (targetZoom: number, clientX: number, clientY: number) => {
+      const el = frameRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const prevZ = zoomRef.current;
+      const prevP = panRef.current;
+      const nextZ = clamp(targetZoom, MIN_ZOOM, MAX_ZOOM);
+
+      if (nextZ <= 1.005) {
+        applyTransform(1, { x: 0, y: 0 });
+        return;
+      }
+
+      const fx = clientX - (rect.left + rect.width / 2);
+      const fy = clientY - (rect.top + rect.height / 2);
+      const nextX = fx - ((fx - prevP.x) / prevZ) * nextZ;
+      const nextY = fy - ((fy - prevP.y) / prevZ) * nextZ;
+      applyTransform(nextZ, { x: nextX, y: nextY });
+    },
+    [applyTransform]
+  );
+
+  const zoomByStep = useCallback(
+    (factor: number) => {
+      const el = frameRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      zoomAtPoint(
+        zoomRef.current * factor,
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2
+      );
+    },
+    [zoomAtPoint]
+  );
 
   // Reset zoom/pan when changing star
   useEffect(() => {
     applyTransform(1, { x: 0, y: 0 });
-  }, [star.id]);
+  }, [star.id, applyTransform]);
+
+  // Keyboard zoom shortcuts (+/-/0)
+  useEffect(() => {
+    if (!keyboardActive) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        zoomByStep(1.4);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        zoomByStep(1 / 1.4);
+      } else if (e.key === '0') {
+        e.preventDefault();
+        applyTransform(1, { x: 0, y: 0 });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [keyboardActive, zoomByStep, applyTransform]);
 
   // Native non-passive wheel listener for smooth cursor-centered zoom
   useEffect(() => {
@@ -149,7 +317,7 @@ function ZoomableStarFrame({
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [zoomAtPoint]);
 
   // Keep canvas sized cleanly to frame
   useEffect(() => {
@@ -164,161 +332,38 @@ function ZoomableStarFrame({
       const h = Math.max(80, Math.floor(rect.height));
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
-      // Re-clamp pan if container resized
+
       const clamped = clampPan(panRef.current, zoomRef.current, w, h);
       if (clamped.x !== panRef.current.x || clamped.y !== panRef.current.y) {
         panRef.current = clamped;
         setPan(clamped);
       }
+      drawScanOverlay();
     };
 
     syncSize();
     const ro = new ResizeObserver(syncSize);
     ro.observe(frame);
     return () => ro.disconnect();
-  }, [star.id, isExpanded]);
+  }, [star.id, isExpanded, drawScanOverlay]);
 
-  // Synchronized light scan beam loop
+  // Redraw static loop overlay immediately when paused or range changes
   useEffect(() => {
-    const canvas = overlayCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    drawScanOverlay();
+  }, [star.id, star.scanMode, loopRange, isPlaying, drawScanOverlay]);
 
-    const engine = LoopSamplerEngine.getInstance();
+  // Run rAF scan beam ONLY while playing (0% idle CPU/GPU)
+  useEffect(() => {
+    if (!isPlaying) return;
     let rafId = 0;
-
-    const draw = () => {
-      rafId = window.requestAnimationFrame(draw);
+    const tick = () => {
+      rafId = window.requestAnimationFrame(tick);
       if (document.hidden) return;
-
-      const { star: curStar, loopRange: range, isPlaying: playing } = stateRef.current;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = canvas.width / dpr;
-      const h = canvas.height / dpr;
-      const invZ = 1 / Math.max(1, zoomRef.current);
-
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, w, h);
-
-      const [a, b] = range;
-      const playNorm = engine.getPlayheadNormalized();
-      const rms = playing ? engine.getMasterRMS() : 0;
-
-      if (curStar.scanMode === 'left-to-right') {
-        ctx.fillStyle = 'rgba(5, 6, 9, 0.54)';
-        if (a > 0.002) ctx.fillRect(0, 0, a * w, h);
-        if (b < 0.998) ctx.fillRect(b * w, 0, (1 - b) * w, h);
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
-        ctx.lineWidth = 1 * invZ;
-        if (a > 0.002) {
-          ctx.beginPath();
-          ctx.moveTo(a * w, 0);
-          ctx.lineTo(a * w, h);
-          ctx.stroke();
-        }
-        if (b < 0.998) {
-          ctx.beginPath();
-          ctx.moveTo(b * w, 0);
-          ctx.lineTo(b * w, h);
-          ctx.stroke();
-        }
-
-        if (playing) {
-          const x = playNorm * w;
-          const trailW = 28 * invZ;
-          const grad = ctx.createLinearGradient(x - trailW, 0, x + 4 * invZ, 0);
-          grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-          grad.addColorStop(0.85, `rgba(255, 255, 255, ${0.18 + rms * 0.2})`);
-          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(x - trailW, 0, trailW + 4 * invZ, h);
-
-          ctx.strokeStyle = `rgba(255, 255, 255, ${0.78 + rms * 0.22})`;
-          ctx.lineWidth = 1.6 * invZ;
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, h);
-          ctx.stroke();
-        }
-      } else if (curStar.scanMode === 'vertical') {
-        ctx.fillStyle = 'rgba(5, 6, 9, 0.54)';
-        if (a > 0.002) ctx.fillRect(0, 0, w, a * h);
-        if (b < 0.998) ctx.fillRect(0, b * h, w, (1 - b) * h);
-
-        if (playing) {
-          const y = playNorm * h;
-          ctx.strokeStyle = `rgba(255, 255, 255, ${0.78 + rms * 0.22})`;
-          ctx.lineWidth = 1.6 * invZ;
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(w, y);
-          ctx.stroke();
-        }
-      } else if (curStar.scanMode === 'clockwise') {
-        const cx = w * 0.5;
-        const cy = h * 0.5;
-        const r = Math.hypot(cx, cy);
-        const startAng = -Math.PI * 0.5 + a * Math.PI * 2;
-        const endAng = -Math.PI * 0.5 + b * Math.PI * 2;
-
-        if (b - a < 0.99) {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
-          ctx.lineWidth = 1 * invZ;
-          for (const ang of [startAng, endAng]) {
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            ctx.lineTo(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r);
-            ctx.stroke();
-          }
-        }
-
-        if (playing) {
-          const curAng = -Math.PI * 0.5 + playNorm * Math.PI * 2;
-          ctx.strokeStyle = `rgba(255, 255, 255, ${0.82 + rms * 0.18})`;
-          ctx.lineWidth = 1.6 * invZ;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(cx + Math.cos(curAng) * r, cy + Math.sin(curAng) * r);
-          ctx.stroke();
-
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-          ctx.beginPath();
-          ctx.arc(cx, cy, (3 + rms * 3) * invZ, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (curStar.scanMode === 'radial') {
-        const cx = w * 0.5;
-        const cy = h * 0.5;
-        const maxR = Math.min(w, h) * 0.52;
-
-        if (b - a < 0.99) {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.26)';
-          ctx.lineWidth = 1 * invZ;
-          for (const radNorm of [a, b]) {
-            ctx.beginPath();
-            ctx.arc(cx, cy, radNorm * maxR, 0, Math.PI * 2);
-            ctx.stroke();
-          }
-        }
-
-        if (playing) {
-          ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 + rms * 0.2})`;
-          ctx.lineWidth = 1.6 * invZ;
-          ctx.beginPath();
-          ctx.arc(cx, cy, Math.max(2, playNorm * maxR), 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-
-      ctx.restore();
+      drawScanOverlay();
     };
-
-    rafId = window.requestAnimationFrame(draw);
+    rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, []);
+  }, [isPlaying, drawScanOverlay]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -423,6 +468,7 @@ function ZoomableStarFrame({
           key={displayedImage}
           src={displayedImage}
           alt={star.name}
+          decoding="async"
           className="w-full h-full object-cover select-none pointer-events-none"
           draggable={false}
         />
@@ -503,7 +549,6 @@ export function StarStage({
 }: StarStageProps) {
   const [expanded, setExpanded] = useState(false);
 
-  // Resolve real NASA photograph: soloing a stem with its own official photo switches to that telescope image
   let displayedImage = star.imageUrl;
   let activeLayerTag: string | null = null;
   if (activeStemIds.length === 1) {
@@ -516,7 +561,6 @@ export function StarStage({
     }
   }
 
-  // Close fullscreen inspect cleanly with Escape before returning to gallery
   useEffect(() => {
     if (!expanded) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -540,12 +584,12 @@ export function StarStage({
             loopRange={loopRange}
             isPlaying={isPlaying}
             isExpanded={false}
+            keyboardActive={!expanded}
             onToggleExpand={() => setExpanded(true)}
             className="h-full max-h-[340px] sm:max-h-[400px] lg:max-h-[440px] max-w-full aspect-square rounded-[24px]"
           />
         </div>
 
-        {/* Factual NASA Context + Quiet Zoom Hint */}
         <div className="shrink-0 max-w-xl text-center px-2">
           <div className="font-mono-tabular text-[10px] tracking-[0.12em] uppercase text-[#7E889B]">
             {star.telescopes.join(' · ')} — {SCAN_LABELS[star.scanMode]}
@@ -560,7 +604,6 @@ export function StarStage({
         </div>
       </div>
 
-      {/* Fullscreen Interactive Lightbox */}
       {expanded && (
         <div
           role="dialog"
@@ -572,7 +615,6 @@ export function StarStage({
             paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
           }}
         >
-          {/* Top Lightbox Pill Bar */}
           <div className="w-full max-w-5xl flex items-center justify-between gap-3">
             <div className="liquid-pill px-4 py-2 rounded-full flex items-center gap-3 min-w-0">
               <span className="text-xs sm:text-sm font-medium text-[#F2F5FA] truncate">
@@ -610,7 +652,6 @@ export function StarStage({
             </div>
           </div>
 
-          {/* Center Large Interactive Zoomable Canvas */}
           <div className="flex-1 min-h-0 w-full flex items-center justify-center py-4">
             <ZoomableStarFrame
               star={star}
@@ -619,6 +660,7 @@ export function StarStage({
               loopRange={loopRange}
               isPlaying={isPlaying}
               isExpanded={true}
+              keyboardActive={true}
               onToggleExpand={() => setExpanded(false)}
               className="h-full max-h-[74dvh] max-w-[92vw] aspect-square rounded-[28px]"
             />

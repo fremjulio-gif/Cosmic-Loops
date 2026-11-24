@@ -150,7 +150,7 @@ export class LoopSamplerEngine {
     return Math.max(0, Math.min(1, this.previewAudio.currentTime / this.previewAudio.duration));
   }
 
-  // --- Star Loading & LRU Cache ---
+  // --- Star Loading & LRU Cache (Priority Active Stems First) ---
 
   getStarBuffers(starId: string): Map<string, AudioBuffer> | null {
     const entry = this.starCache.get(starId);
@@ -161,7 +161,9 @@ export class LoopSamplerEngine {
 
   async loadStar(
     star: StarObject,
-    onStemStatus: (stemId: string, status: StemLoadStatus) => void
+    onStemStatus: (stemId: string, status: StemLoadStatus) => void,
+    priorityStemIds: string[] = [],
+    onPriorityReady?: () => void
   ): Promise<Map<string, AudioBuffer>> {
     this.activeAbortController?.abort();
     const controller = new AbortController();
@@ -182,43 +184,95 @@ export class LoopSamplerEngine {
       cached.lastUsedAt = Date.now();
     }
 
-    const ordered = [...star.stems].sort(
-      (a, b) => Number(a.isComposite) - Number(b.isComposite)
+    const prioritySet = new Set(priorityStemIds);
+    const priorityBatch =
+      prioritySet.size > 0
+        ? star.stems.filter((s) => prioritySet.has(s.id))
+        : star.stems.filter((s) => !s.isComposite);
+    const backgroundBatch = star.stems.filter(
+      (s) => !priorityBatch.some((p) => p.id === s.id)
     );
 
-    const concurrency = 2;
-    let cursor = 0;
+    const runBatch = async (batch: typeof star.stems, concurrency: number) => {
+      if (batch.length === 0) return;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < batch.length) {
+          if (controller.signal.aborted) return;
+          const stem = batch[cursor++];
+          if (cached!.buffers.has(stem.id)) {
+            onStemStatus(stem.id, 'ready');
+            continue;
+          }
+          onStemStatus(stem.id, 'loading');
+          try {
+            const resp = await fetch(stem.url, { signal: controller.signal });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const ab = await resp.arrayBuffer();
+            if (controller.signal.aborted) return;
+            const decoded = await ctx.decodeAudioData(ab);
+            if (controller.signal.aborted) return;
+            cached!.buffers.set(stem.id, decoded);
+            this.attachBackgroundStem(star.id, stem.id, decoded);
+            onStemStatus(stem.id, 'ready');
+          } catch (err) {
+            if ((err as Error)?.name === 'AbortError') return;
+            onStemStatus(stem.id, 'error');
+          }
+        }
+      };
 
-    const worker = async () => {
-      while (cursor < ordered.length) {
-        if (controller.signal.aborted) return;
-        const stem = ordered[cursor++];
-        if (cached!.buffers.has(stem.id)) {
-          onStemStatus(stem.id, 'ready');
-          continue;
-        }
-        onStemStatus(stem.id, 'loading');
-        try {
-          const resp = await fetch(stem.url, { signal: controller.signal });
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const ab = await resp.arrayBuffer();
-          if (controller.signal.aborted) return;
-          const decoded = await ctx.decodeAudioData(ab);
-          if (controller.signal.aborted) return;
-          cached!.buffers.set(stem.id, decoded);
-          onStemStatus(stem.id, 'ready');
-        } catch (err) {
-          if ((err as Error)?.name === 'AbortError') return;
-          onStemStatus(stem.id, 'error');
-        }
-      }
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, batch.length) }, () => worker())
+      );
     };
 
-    await Promise.all(
-      Array.from({ length: Math.min(concurrency, ordered.length) }, () => worker())
-    );
+    await runBatch(priorityBatch, 3);
+    if (controller.signal.aborted) return cached.buffers;
+    onPriorityReady?.();
 
+    await runBatch(backgroundBatch, 2);
     return cached.buffers;
+  }
+
+  private attachBackgroundStem(starId: string, stemId: string, buf: AudioBuffer) {
+    if (!this.ctx || !this.mixBus || this.currentStar?.id !== starId) return;
+
+    let gainNode = this.stemGainNodes.get(stemId);
+    if (!gainNode) {
+      gainNode = this.ctx.createGain();
+      gainNode.gain.value = this.activeStemIds.has(stemId) ? 0.78 : 0;
+      gainNode.connect(this.mixBus);
+      this.stemGainNodes.set(stemId, gainNode);
+    }
+
+    if (
+      this.isPlayingState &&
+      !this.activeSources.some((s) => s.stemId === stemId)
+    ) {
+      this.syncPlayhead();
+      const now = this.ctx.currentTime;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = this.playbackRate;
+      src.loop = true;
+
+      const isShort = buf.duration < this.loopEndSec - 0.15;
+      if (isShort) {
+        src.loopStart = 0;
+        src.loopEnd = buf.duration;
+        src.start(now, this.playheadSec % buf.duration);
+      } else {
+        src.loopStart = this.loopStartSec;
+        src.loopEnd = Math.min(this.loopEndSec, buf.duration);
+        src.start(
+          now,
+          Math.min(this.playheadSec, Math.max(0, buf.duration - 0.02))
+        );
+      }
+      src.connect(gainNode);
+      this.activeSources.push({ stemId, source: src, gainNode, shortStem: isShort });
+    }
   }
 
   private evictLRU(keepStarId: string) {
@@ -289,7 +343,6 @@ export class LoopSamplerEngine {
       return;
     }
 
-    // Update non-short sources seamlessly on the fly
     for (const item of this.activeSources) {
       if (!item.shortStem && item.source.buffer) {
         item.source.loopStart = clampedStart;
@@ -486,7 +539,6 @@ export class LoopSamplerEngine {
 
     const rendered = await offline.startRendering();
 
-    // Normalize peak transparently if > 0.95 and apply 5ms click-free edge fades
     const left = rendered.getChannelData(0);
     const right = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : left;
     let maxPeak = 0;

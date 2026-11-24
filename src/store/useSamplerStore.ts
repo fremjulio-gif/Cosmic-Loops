@@ -234,23 +234,27 @@ export const useSamplerStore = create<SamplerStoreState>((set, get) => {
       window.scrollTo(0, 0);
 
       await engine.ensureContext();
-      await engine.loadStar(star, (stemId, status) => {
-        if (get().activeStarId !== star.id) return;
-        set((prev) => ({
-          loadingStems: { ...prev.loadingStems, [stemId]: status },
-        }));
-      });
-
-      if (get().activeStarId !== star.id) return;
-
-      const cur = get();
-      const curDur = computeTimelineDuration(star, cur.activeStemIds);
-      engine.configureStar(star, cur.activeStemIds, curDur);
-      engine.setPitchSemis(cur.pitchSemis);
-      engine.setLoopWindow(
-        cur.loopRange[0] * curDur,
-        cur.loopRange[1] * curDur,
-        curDur
+      await engine.loadStar(
+        star,
+        (stemId, status) => {
+          if (get().activeStarId !== star.id) return;
+          set((prev) => ({
+            loadingStems: { ...prev.loadingStems, [stemId]: status },
+          }));
+        },
+        initialActive,
+        () => {
+          if (get().activeStarId !== star.id) return;
+          const cur = get();
+          const curDur = computeTimelineDuration(star, cur.activeStemIds);
+          engine.configureStar(star, cur.activeStemIds, curDur);
+          engine.setPitchSemis(cur.pitchSemis);
+          engine.setLoopWindow(
+            cur.loopRange[0] * curDur,
+            cur.loopRange[1] * curDur,
+            curDur
+          );
+        }
       );
     },
 

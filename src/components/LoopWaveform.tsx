@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { LoopSamplerEngine } from '../audio/LoopSamplerEngine';
 import type { LoopBarsOption } from '../types/catalog';
 
@@ -7,6 +7,7 @@ interface LoopWaveformProps {
   color: string;
   loopRange: [number, number];
   loopBars: LoopBarsOption;
+  isPlaying: boolean;
   onLoopRangeChange: (range: [number, number]) => void;
   onSlideWindow: (newStart: number) => void;
   onSeek: (norm: number) => void;
@@ -24,6 +25,7 @@ export function LoopWaveform({
   color,
   loopRange,
   loopBars,
+  isPlaying,
   onLoopRangeChange,
   onSlideWindow,
   onSeek,
@@ -38,6 +40,7 @@ export function LoopWaveform({
     color,
     loopRange,
     loopBars,
+    isPlaying,
     onLoopRangeChange,
     onSlideWindow,
     onSeek,
@@ -47,10 +50,74 @@ export function LoopWaveform({
     color,
     loopRange,
     loopBars,
+    isPlaying,
     onLoopRangeChange,
     onSlideWindow,
     onSeek,
   };
+
+  const drawWaveform = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const engine = LoopSamplerEngine.getInstance();
+    const p = latestProps.current;
+    const { width, height, dpr } = sizeRef.current;
+    const midY = height * 0.5;
+    const [a, b] = p.loopRange;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    const xA = a * width;
+    const xB = b * width;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(xA, 0, Math.max(2, xB - xA), height);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+    ctx.lineTo(width, midY);
+    ctx.stroke();
+
+    const list = p.peaks.length > 0 ? p.peaks : [0.06];
+    const stepX = width / list.length;
+    const maxH = height * 0.4;
+
+    for (let i = 0; i < list.length; i++) {
+      const normX = (i + 0.5) / list.length;
+      const inLoop = normX >= a && normX <= b;
+      const amp = Math.max(0.03, list[i]);
+      const h = amp * maxH;
+      const x = i * stepX;
+      const barW = Math.max(1.2, stepX - 0.8);
+
+      ctx.fillStyle = inLoop ? p.color || '#F2F5FA' : '#586073';
+      ctx.globalAlpha = inLoop ? 0.94 : 0.4;
+      ctx.fillRect(x, midY - h, barW, h * 2);
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.fillRect(xA, 0, Math.max(2, xB - xA), 2);
+    ctx.fillRect(xA, height - 2, Math.max(2, xB - xA), 2);
+
+    ctx.fillRect(Math.max(0, xA - 1), 0, 2.5, height);
+    ctx.fillRect(Math.min(width - 2.5, xB - 1.5), 0, 2.5, height);
+
+    const playNorm = engine.getPlayheadNormalized();
+    if (engine.isPlaying() || playNorm > 0) {
+      const px = playNorm * width;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(px - 0.75, 0, 1.5, height);
+    }
+
+    ctx.restore();
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -65,92 +132,32 @@ export function LoopWaveform({
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
       sizeRef.current = { width: w, height: h, dpr };
+      drawWaveform();
     };
 
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(container);
     return () => ro.disconnect();
-  }, []);
+  }, [drawWaveform]);
 
+  // Redraw synchronously when paused state or visual props change
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    drawWaveform();
+  }, [peaks, color, loopRange, isPlaying, drawWaveform]);
 
-    const engine = LoopSamplerEngine.getInstance();
+  // Run rAF only while actively playing (0% idle CPU/GPU)
+  useEffect(() => {
+    if (!isPlaying) return;
     let rafId = 0;
-
-    const draw = () => {
-      rafId = window.requestAnimationFrame(draw);
+    const tick = () => {
+      rafId = window.requestAnimationFrame(tick);
       if (document.hidden) return;
-
-      const p = latestProps.current;
-      const { width, height, dpr } = sizeRef.current;
-      const midY = height * 0.5;
-      const [a, b] = p.loopRange;
-
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, width, height);
-
-      // Selected Loop Frosted Highlight
-      const xA = a * width;
-      const xB = b * width;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-      ctx.fillRect(xA, 0, Math.max(2, xB - xA), height);
-
-      // Center reference line
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, midY);
-      ctx.lineTo(width, midY);
-      ctx.stroke();
-
-      // Waveform Bars
-      const list = p.peaks.length > 0 ? p.peaks : [0.06];
-      const stepX = width / list.length;
-      const maxH = height * 0.4;
-
-      for (let i = 0; i < list.length; i++) {
-        const normX = (i + 0.5) / list.length;
-        const inLoop = normX >= a && normX <= b;
-        const amp = Math.max(0.03, list[i]);
-        const h = amp * maxH;
-        const x = i * stepX;
-        const barW = Math.max(1.2, stepX - 0.8);
-
-        ctx.fillStyle = inLoop ? p.color || '#F2F5FA' : '#586073';
-        ctx.globalAlpha = inLoop ? 0.94 : 0.4;
-        ctx.fillRect(x, midY - h, barW, h * 2);
-      }
-      ctx.globalAlpha = 1;
-
-      // Specular Loop Bracket Rails
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-      ctx.fillRect(xA, 0, Math.max(2, xB - xA), 2);
-      ctx.fillRect(xA, height - 2, Math.max(2, xB - xA), 2);
-
-      // Left & Right Handle Bars
-      ctx.fillRect(Math.max(0, xA - 1), 0, 2.5, height);
-      ctx.fillRect(Math.min(width - 2.5, xB - 1.5), 0, 2.5, height);
-
-      // Live Playhead
-      const playNorm = engine.getPlayheadNormalized();
-      if (engine.isPlaying() || playNorm > 0) {
-        const px = playNorm * width;
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(px - 0.75, 0, 1.5, height);
-      }
-
-      ctx.restore();
+      drawWaveform();
     };
-
-    rafId = window.requestAnimationFrame(draw);
+    rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, []);
+  }, [isPlaying, drawWaveform]);
 
   const normFromX = (clientX: number) => {
     const el = containerRef.current;
@@ -205,6 +212,7 @@ export function LoopWaveform({
       onSlideWindow(norm - drag.offsetFromStart);
     } else if (drag.kind === 'seek') {
       onSeek(norm);
+      drawWaveform();
     }
   };
 

@@ -74,15 +74,16 @@ export function SamplerView() {
 
   return (
     <div className="safe-sampler-frame relative z-10 flex flex-col">
-      {/* Ambient Real-Starlight Bleed Behind Liquid Glass */}
+      {/* Ambient Real-Starlight Bleed Behind Liquid Glass (GPU-light 320px source) */}
       <div
         aria-hidden="true"
-        className="fixed inset-0 -z-10 overflow-hidden pointer-events-none"
+        className="fixed inset-0 -z-10 flex items-center justify-center overflow-hidden pointer-events-none"
       >
         <img
           src={ambientImage}
           alt=""
-          className="w-full h-full object-cover opacity-[0.22] blur-[90px] scale-125 saturate-150"
+          decoding="async"
+          className="w-[42vw] h-[42vh] max-w-[320px] max-h-[320px] object-cover opacity-[0.22] blur-3xl scale-[2.6] saturate-150 transform-gpu"
         />
         <div className="absolute inset-0 bg-[#050609]/45" />
       </div>
@@ -185,6 +186,7 @@ export function SamplerView() {
               color={primaryActiveStem?.color ?? '#56B4E9'}
               loopRange={loopRange}
               loopBars={loopBars}
+              isPlaying={isPlaying}
               onLoopRangeChange={(r) => setLoopRange(r, true)}
               onSlideWindow={slideLoopWindow}
               onSeek={seekNormalized}

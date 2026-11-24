@@ -120,10 +120,11 @@ export function GalleryView() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
-            {filtered.map((star) => {
+            {filtered.map((star, idx) => {
               const isPreviewing = galleryPreviewStarId === star.id;
               const isolated = star.stems.filter((s) => !s.isComposite);
               const dots = (isolated.length > 0 ? isolated : star.stems).slice(0, 5);
+              const eager = idx < 4;
 
               return (
                 <article
@@ -136,7 +137,8 @@ export function GalleryView() {
                     <img
                       src={star.imageUrl}
                       alt={star.name}
-                      loading="lazy"
+                      loading={eager ? 'eager' : 'lazy'}
+                      fetchPriority={eager ? 'high' : 'auto'}
                       decoding="async"
                       className="space-card-img w-full h-full object-cover transition-transform duration-500 ease-out"
                     />

@@ -18,7 +18,7 @@ export function StarfieldBackground() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const stars: StarPoint[] = Array.from({ length: 90 }, () => ({
+    const stars: StarPoint[] = Array.from({ length: 85 }, () => ({
       x: Math.random(),
       y: Math.random(),
       r: Math.random() < 0.8 ? 0.85 : 1.35,
@@ -31,6 +31,26 @@ export function StarfieldBackground() {
     let height = window.innerHeight;
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
+    const drawStars = (dt: number) => {
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
+
+      for (let i = 0; i < stars.length; i++) {
+        const s = stars[i];
+        if (dt > 0) {
+          s.x = (s.x + s.driftX * dt + 1) % 1;
+          s.y = (s.y + s.driftY * dt + 1) % 1;
+        }
+        ctx.fillStyle = '#E8EDF5';
+        ctx.globalAlpha = s.alpha;
+        ctx.beginPath();
+        ctx.arc(s.x * width, s.y * height, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
     const resize = () => {
       width = window.innerWidth;
       height = window.innerHeight;
@@ -39,39 +59,26 @@ export function StarfieldBackground() {
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
+      drawStars(0);
     };
 
     resize();
     window.addEventListener('resize', resize);
 
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      return () => window.removeEventListener('resize', resize);
+    }
+
     let rafId = 0;
-    let last = performance.now();
+    let lastDraw = performance.now();
 
     const frame = (now: number) => {
       rafId = window.requestAnimationFrame(frame);
-      if (document.hidden) {
-        last = now;
-        return;
-      }
-
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
-
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, width, height);
-
-      for (let i = 0; i < stars.length; i++) {
-        const s = stars[i];
-        s.x = (s.x + s.driftX * dt + 1) % 1;
-        s.y = (s.y + s.driftY * dt + 1) % 1;
-        ctx.fillStyle = '#E8EDF5';
-        ctx.globalAlpha = s.alpha;
-        ctx.beginPath();
-        ctx.arc(s.x * width, s.y * height, s.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+      if (document.hidden || now - lastDraw < 33) return;
+      const dt = Math.min(0.08, (now - lastDraw) / 1000);
+      lastDraw = now;
+      drawStars(dt);
     };
 
     rafId = window.requestAnimationFrame(frame);

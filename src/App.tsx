@@ -1,8 +1,11 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { GalleryView } from './components/GalleryView';
-import { SamplerView } from './components/SamplerView';
 import { StarfieldBackground } from './components/StarfieldBackground';
 import { useSamplerStore } from './store/useSamplerStore';
+
+const LazySamplerView = lazy(() =>
+  import('./components/SamplerView').then((m) => ({ default: m.SamplerView }))
+);
 
 export function App() {
   const catalogReady = useSamplerStore((s) => s.catalogReady);
@@ -15,6 +18,25 @@ export function App() {
   useEffect(() => {
     void initCatalog();
   }, [initCatalog]);
+
+  // Idle prefetch of SamplerView chunk once Gallery mounts
+  useEffect(() => {
+    if (!catalogReady) return;
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (win.requestIdleCallback) {
+      const id = win.requestIdleCallback(() => {
+        void import('./components/SamplerView');
+      });
+      return () => win.cancelIdleCallback?.(id);
+    }
+    const tid = window.setTimeout(() => {
+      void import('./components/SamplerView');
+    }, 800);
+    return () => window.clearTimeout(tid);
+  }, [catalogReady]);
 
   useEffect(() => {
     const onFirstGesture = () => {
@@ -44,6 +66,14 @@ export function App() {
       } else if (e.key === 'Escape') {
         if (st.infoOpen) st.setInfoOpen(false);
         else if (st.view === 'sampler') st.backToGallery();
+      } else if (st.view === 'sampler' && !st.infoOpen) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          st.cycleStar(-1);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          st.cycleStar(1);
+        }
       }
     };
 
@@ -77,7 +107,19 @@ export function App() {
   return (
     <div className="relative min-h-[100dvh] bg-[#050609]">
       <StarfieldBackground />
-      {view === 'gallery' ? <GalleryView /> : <SamplerView />}
+      {view === 'gallery' ? (
+        <GalleryView />
+      ) : (
+        <Suspense
+          fallback={
+            <div className="safe-sampler-frame relative z-10 flex items-center justify-center font-mono-tabular text-xs uppercase tracking-[0.14em] text-[#667085]">
+              CHARGEMENT…
+            </div>
+          }
+        >
+          <LazySamplerView />
+        </Suspense>
+      )}
     </div>
   );
 }
